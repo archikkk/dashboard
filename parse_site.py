@@ -25,6 +25,13 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+# Optional site-specific parsers
+try:
+    from site_parsers import SITE_PARSERS, Movie  # type: ignore
+except ModuleNotFoundError:
+    SITE_PARSERS = {}
+    Movie = None  # type: ignore
+
 
 class WebsiteParser:
     """Parses a webpage and extracts useful information."""
@@ -94,15 +101,52 @@ class WebsiteParser:
 
 
 def main(argv: List[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Parse a website and extract basic information.")
-    parser.add_argument("url", help="URL of the website to parse")
+    parser = argparse.ArgumentParser(
+        description="Generic HTML parser OR site-specific search for lordfilm/kinogo/filmix"
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=False)
+
+    # Generic parse (default)
+    parse_p = subparsers.add_parser("parse", help="Parse arbitrary URL (default)")
+    parse_p.add_argument("url", help="URL of the website to parse")
+
+    # Site-specific search
+    if SITE_PARSERS:
+        search_p = subparsers.add_parser("search", help="Search on supported cinema sites")
+        search_p.add_argument("site", choices=SITE_PARSERS.keys(), help="Target site")
+        search_p.add_argument("query", help="Search query, e.g., film title")
+
+    # If no subcommand provided, assume "parse"
+    if argv is None and len(sys.argv) > 1 and sys.argv[1] not in ("parse", "search"):
+        # Inject default command
+        argv = ["parse", *sys.argv[1:]]
+
     args = parser.parse_args(argv)
 
-    parsed = urlparse(args.url)
+    # --------------------------------------------------
+    # SUBCOMMAND: search on lordfilm/kinogo/filmix
+    # --------------------------------------------------
+    if args.command == "search":
+        ParserCls = SITE_PARSERS[args.site]
+        parser_inst = ParserCls()
+        results = parser_inst.search(args.query)
+        if not results:
+            print("No results found.")
+            return
+        for idx, m in enumerate(results, 1):
+            print(f"{idx}. {m.title} ({m.year or '—'})\n   {m.url}\n")
+        return
+
+    # --------------------------------------------------
+    # Default: generic parse
+    # --------------------------------------------------
+    target_url = args.url
+    parsed = urlparse(target_url)
     if not parsed.scheme or not parsed.netloc:
         parser.error("Please provide a valid absolute URL, e.g., https://example.com")
 
-    wp = WebsiteParser(args.url)
+    wp = WebsiteParser(target_url)
     wp.fetch()
     wp.parse()
 
